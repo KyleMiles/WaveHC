@@ -184,6 +184,7 @@ uint8_t *sdend;        ///< end of data in sd buffer
 #define SD_END_FILE 3  ///< reached end of file
 uint8_t sdstatus = 0;
 
+#if USE_WAVE_HC == 1
 //------------------------------------------------------------------------------
 // timer interrupt for DAC
 ISR(TIMER1_COMPA_vect) {
@@ -293,6 +294,7 @@ ISR(TIMER1_COMPB_vect) {
     sdstatus = SD_END_FILE;
   }
 }
+#endif
 
 //------------------------------------------------------------------------------
 /** create an instance of WaveHC. */
