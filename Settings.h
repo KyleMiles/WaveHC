@@ -30,7 +30,7 @@
  * Set attributes for music files
  * Cannot play multiple files together if they don't all have the same bit-rate
  */
-#define GLOBAL_BIT_DEPTH 8
+#define GLOBAL_BIT_DEPTH 16
 #if GLOBAL_BIT_DEPTH != 8 && GLOBAL_BIT_DEPTH != 16
 #error GLOBAL_BIT_DEPTH must be either 8 or 16
 #endif

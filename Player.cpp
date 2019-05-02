@@ -60,6 +60,8 @@ Player::Player()
   if (WavePlayer::player != nullptr)
     error_log("There can only be one player!!");
 
+  WavePlayer::player = this;
+
   if (!card.init())
     error("Card init. failed!", card);  // Something went wrong, lets print out why
 
@@ -268,12 +270,12 @@ bool Player::verify_file(FatReader& f)
   else
     buf.fmt.compress = 0;  // compressed data - force error
 
-  // Confirming file info
-  if (buf.fmt.compress != 1 || (size == 18 && buf.fmt.extraBytes != 0))
-  {
-    putstring_nl("Compression not supported");
-    return false;
-  }
+  // // Confirming file info
+  // if (buf.fmt.compress != 1 || (size == 18 && buf.fmt.extraBytes != 0))
+  // {
+  //   putstring_nl("Compression not supported");
+  //   return false;
+  // }
   if (buf.fmt.channels != GLOBAL_CHANNELS)
   {
     putstring_nl("File's Channel Count Does Not Match Settings!");
@@ -366,7 +368,8 @@ int16_t Player::readWaveData(uint8_t *buff, uint16_t len, File* const file)
     // turn off calling interrupt
     TIMSK1 &= ~_BV(OCIE1B);
     
-    if (WavePlayer::sdstatus != SD_FILLING) return;
+    if (WavePlayer::sdstatus != SD_FILLING)
+      return;
 
     WavePlayer::player->sd_handler();
   }
@@ -414,7 +417,10 @@ void Player::dac_handler()
       // swap double buffers
       playpos = sdbuff;
       playend = sdend;
-      sdbuff = sdbuff != WavePlayer::buffer1 ? WavePlayer::buffer1 : WavePlayer::buffer2;
+      if (sdbuff != WavePlayer::buffer1)
+        sdbuff = WavePlayer::buffer1;
+      else
+        sdbuff = WavePlayer::buffer2;
       
       WavePlayer::sdstatus = SD_FILLING;
       // interrupt to call SD reader
@@ -453,23 +459,20 @@ void Player::dac_handler()
 
 void Player::sd_handler()
 {
-  // enable interrupts while reading the SD
-  sei();
-
   for (int i = 0; i < CHANNEL_COUNT; ++i)
   {
-    int16_t read_data = readWaveData(sdbuff, PLAYBUFFLEN/channel_top, channels[i]);
+    if (!channels[i]->active)
+      continue;
 
+    sei();  // enable interrupts while reading the SD
+    int16_t read_data = readWaveData(sdbuff, PLAYBUFFLEN/channel_top, channels[i]);
     cli();
+
     if (read_data > 0)
-    {
       sdend = sdbuff + read_data;
-      WavePlayer::sdstatus = SD_READY;
-    }
     else
     {
       sdend = sdbuff;
-      WavePlayer::sdstatus = SD_READY;
 
       channels[i]->active = false;
 
@@ -482,4 +485,6 @@ void Player::sd_handler()
       channels[i]->remainingBytesInChunk = 0;
     }
   }
+
+  WavePlayer::sdstatus = SD_READY;
 }
