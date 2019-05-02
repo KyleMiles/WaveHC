@@ -4,16 +4,16 @@
 #include <FatReader.h>
 #include <WaveUtil.h>
 
-#define CHANNEL_COUNT 16
+#define CHANNEL_COUNT 1
 
 
 struct File
 {
-  File() : active(false), index(-1), file(nullptr), remainingBytesInChunk(0) { }
+  File() : active(false), index(-1), file_reader(FatReader()), remainingBytesInChunk(0) { }
 
   bool active;
   short index;
-  FatReader* file;
+  FatReader file_reader;
   uint32_t remainingBytesInChunk;
 };
 
@@ -39,8 +39,8 @@ class Player
   File* channels[CHANNEL_COUNT];
   void decrement_channel_index(short reference_index);
 
-  FatReader* find_and_load(const char* const filename);
-  bool verify_file(FatReader* const f);
+  FatReader find_and_load(const char* const filename);
+  bool verify_file(FatReader& f);
 
   int16_t readWaveData(uint8_t *buff, uint16_t len, File* const file);
 

@@ -106,12 +106,15 @@ Player::Player()
 bool Player::play(const char* const filename)
 {
   // I promise to give you a slot, so it shouldn't hurt to verify the file before or after choose that slot
-  FatReader* file = find_and_load(filename);
-  if (!verify_file(file))
+  FatReader file = find_and_load(filename);
+  if (!file.isOpen())
   {
-    delete file;
+    putstring_nl("Could not find file");
     return false;
   }
+
+  if (!verify_file(file))
+    return false;
 
   File* overwrite = nullptr;
 
@@ -121,7 +124,7 @@ bool Player::play(const char* const filename)
     {
       channels[i]->active = true;
       channels[i]->index = channel_top; channel_top += 1;
-      channels[i]->file = file;
+      channels[i]->file_reader = file;
       channels[i]->remainingBytesInChunk = 0;
 
       TIMSK1 |= _BV(OCIE1A);  // Enable timer interrupt for DAC ISR
@@ -135,7 +138,7 @@ bool Player::play(const char* const filename)
 
   // Overwrite the overwrite
   overwrite->index = CHANNEL_COUNT-1;
-  delete overwrite->file; overwrite->file = file;
+  overwrite->file_reader = file;
   overwrite->remainingBytesInChunk = 0;
 
   TIMSK1 |= _BV(OCIE1A);  // Enable timer interrupt for DAC ISR
@@ -173,40 +176,39 @@ void Player::decrement_channel_index(short reference_index)
       channels[i]->index -= 1;
 }
 
-FatReader* _find_and_load(const char* const filename, FatReader* current_path, FatVolume& vol, const SdReader& card)
+FatReader _find_and_load(const char* const filename, FatReader current_path, FatVolume& vol, const SdReader& card)
 {
-  FatReader* current_file = new FatReader();  // Current file
+  FatReader current_file;  // Current file
   dir_t dirBuf;  // Read buffer
 
   // Read every file in the directory one at a time
-  while (current_path->readDir(dirBuf) > 0)
+  while (current_path.readDir(dirBuf) > 0)
   {
     // Skip it if not a subdirectory and not the file we're looking for
     if (!DIR_IS_SUBDIR(dirBuf) && strncmp((char *)dirBuf.name, filename, 11))
       continue;
 
     // Try to open the file
-    if (!current_file->open(vol, dirBuf))
+    if (!current_file.open(vol, dirBuf))
       error("file.open failed", card);
 
     // Recurse if subdir, otherwise return the file
-    if (current_file->isDir())
+    if (current_file.isDir())
     {
-      FatReader* temp = _find_and_load(filename, current_file, vol, card);
-      if (temp != nullptr)
+      FatReader temp = _find_and_load(filename, current_file, vol, card);
+      if (temp.isOpen())
         return temp;
     }
     else
       return current_file;
   }
 
-  delete current_file;
-  return nullptr;
+  return FatReader();
 }
 
-FatReader* Player::find_and_load(const char* const filename)
+FatReader Player::find_and_load(const char* const filename)
 {
-  return _find_and_load(filename, &root, vol, card);
+  return _find_and_load(filename, root, vol, card);
 }
 
 // File Verification
@@ -220,7 +222,7 @@ FatReader* Player::find_and_load(const char* const filename)
  * for failure include I/O error, an invalid wave file or a wave
  *  file with features that WaveHC does not support.
  */
-bool Player::verify_file(FatReader* const f)
+bool Player::verify_file(FatReader& f)
 {
   // 18 byte buffer
   // can use this since Arduino and RIFF are Little Endian
@@ -247,21 +249,21 @@ bool Player::verify_file(FatReader* const f)
   
  #if OPTIMIZE_CONTIGUOUS
   // set optimized read for contiguous files
-  f->optimizeContiguous();
+  f.optimizeContiguous();
  #endif // OPTIMIZE_CONTIGUOUS
 
   // must start with WAVE header
-  if (f->read(&buf, 12) != 12 || strncmp(buf.riff.id, "RIFF", 4) || strncmp(buf.riff.data, "WAVE", 4))
+  if (f.read(&buf, 12) != 12 || strncmp(buf.riff.id, "RIFF", 4) || strncmp(buf.riff.data, "WAVE", 4))
     return false;
 
   // next chunk must be fmt
-  if (f->read(&buf, 8) != 8 || strncmp(buf.riff.id, "fmt ", 4))
+  if (f.read(&buf, 8) != 8 || strncmp(buf.riff.id, "fmt ", 4))
     return false;
 
   // fmt chunk size must be 16 or 18
   uint16_t size = buf.riff.size;
   if (size == 16 || size == 18)
-    if (f->read(&buf, size) != (int16_t)size)
+    if (f.read(&buf, size) != (int16_t)size)
       return false;
   else
     buf.fmt.compress = 0;  // compressed data - force error
@@ -298,7 +300,7 @@ bool Player::verify_file(FatReader* const f)
     if (RATE_ERROR_LEVEL > 1)
       return false;
   }
-  else if (byteRate > 44100 && !f->isContiguous())
+  else if (byteRate > 44100 && !f.isContiguous())
   {
     putstring_nl("High rate fragmented file!");
     if (RATE_ERROR_LEVEL > 1)
@@ -321,7 +323,7 @@ int16_t Player::readWaveData(uint8_t *buff, uint16_t len, File* const file)
 
     while (1)
     {
-      if (file->file->read(&header, 8) != 8)
+      if (file->file_reader.read(&header, 8) != 8)
         return -1;
 
       if (!strncmp(header.id, "data", 4))
@@ -331,19 +333,19 @@ int16_t Player::readWaveData(uint8_t *buff, uint16_t len, File* const file)
       }
  
       // if not "data" then skip it!
-      if (!file->file->seekCur(header.size))
+      if (!file->file_reader.seekCur(header.size))
         return -1;
     }
   }
 
   // make sure buffers are aligned on SD sectors
-  uint16_t maxLen = len - file->file->readPosition() % len;
+  uint16_t maxLen = len - file->file_reader.readPosition() % len;
   if (len > maxLen)
     len = maxLen;
   if (len > file->remainingBytesInChunk)
     len = file->remainingBytesInChunk;
   
-  int16_t ret = file->file->read(buff, len);
+  int16_t ret = file->file_reader.read(buff, len);
   if (ret > 0)
     file->remainingBytesInChunk -= ret;
   return ret;
@@ -471,8 +473,7 @@ void Player::sd_handler()
 
       channels[i]->active = false;
 
-      delete channels[i]->file;
-      channels[i]->file = nullptr;
+      channels[i]->file_reader = FatReader();
 
       decrement_channel_index(channels[i]->index);
       channels[i]->index = -1;
