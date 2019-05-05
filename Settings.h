@@ -8,7 +8,7 @@
  * longer to open a file but can play contiguous files at higher rates.
  * Disable if you need minimum latency for open.  Also see open by index.
  */
-#define OPTIMIZE_CONTIGUOUS 1
+#define OPTIMIZE_CONTIGUOUS 0
 
  /**
   * Software volume control should be compatible with Ladyada's library.

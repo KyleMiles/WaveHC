@@ -4,7 +4,7 @@
 #include <FatReader.h>
 #include <WaveUtil.h>
 
-#define CHANNEL_COUNT 1
+#define CHANNEL_COUNT 8
 
 
 struct File
@@ -22,6 +22,7 @@ class Player
 {
  public:
   Player();
+  ~Player();
 
   bool play(const char* const filename);
   void toggle_mute();
@@ -33,6 +34,9 @@ class Player
   void sd_handler();
 
  private:
+  uint8_t buffer1[PLAYBUFFLEN];
+  uint8_t buffer2[PLAYBUFFLEN];
+
   bool mute = false;
 
   short channel_top = 0;

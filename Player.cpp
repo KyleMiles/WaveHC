@@ -11,14 +11,6 @@
 namespace WavePlayer
 {
   Player* player = nullptr;
-
-  uint8_t buffer1[PLAYBUFFLEN];
-  uint8_t buffer2[PLAYBUFFLEN];
-
-  // status of sd
-  #define SD_READY 1     ///< buffer is ready to be played
-  #define SD_FILLING 2   ///< buffer is being filled from DS
-  uint8_t sdstatus = 0;
 }
 
 
@@ -84,12 +76,11 @@ Player::Player()
     channels[i] = new File();
   
   // Setup Buffers
-  playpos = WavePlayer::buffer1;
-  playend = WavePlayer::buffer1;
+  playpos = buffer1;
+  playend = buffer1;
 
-  sdbuff = WavePlayer::buffer2;
+  sdbuff = buffer2;
   sdend = sdbuff;
-  WavePlayer::sdstatus = SD_READY;
   
   // Setup mode for DAC ports
   mcpDacInit();
@@ -103,6 +94,14 @@ Player::Player()
   OCR1A =  F_CPU / (GLOBAL_SAMPLERATE*GLOBAL_CHANNELS);
   // SD fill interrupt happens at TCNT1 == 1
   OCR1B = 1;
+}
+
+Player::~Player()
+{
+  for (int i = 0; i < CHANNEL_COUNT; ++i)
+    delete channels[i];
+  
+  WavePlayer::player = nullptr;
 }
 
 bool Player::play(const char* const filename)
@@ -124,13 +123,21 @@ bool Player::play(const char* const filename)
   {
     if (!channels[i]->active)
     {
+      cli();
       channels[i]->active = true;
       channels[i]->index = channel_top; channel_top += 1;
+      sei();
       channels[i]->file_reader = file;
       channels[i]->remainingBytesInChunk = 0;
 
-      TIMSK1 |= _BV(OCIE1A);  // Enable timer interrupt for DAC ISR
-      return (readWaveData(0, 0, channels[i]) >= 0);  // position to data
+      if (readWaveData(0, 0, channels[i]) >= 0)  // position to data
+      {
+        if (!mute)
+          TIMSK1 |= _BV(OCIE1A);  // Enable timer interrupt for DAC ISR
+        return true;
+      }
+      else
+        return false;
     }
     else if (channels[i]->index == 0)
       overwrite = channels[i];  // Overwrite the oldest channel
@@ -143,19 +150,23 @@ bool Player::play(const char* const filename)
   overwrite->file_reader = file;
   overwrite->remainingBytesInChunk = 0;
 
-  TIMSK1 |= _BV(OCIE1A);  // Enable timer interrupt for DAC ISR
+  if (!mute)
+    TIMSK1 |= _BV(OCIE1A);  // Enable timer interrupt for DAC ISR
   return (readWaveData(0, 0, overwrite) >= 0);  // position to data
 }
 
 void Player::toggle_mute()
 {
-  TIMSK1 &= ~_BV(OCIE1A);  // Turn off interrupt
-  mute != mute;
+  mute = !mute;
+  if (!mute)
+    TIMSK1 |= _BV(OCIE1A);   // Turn on interrupt
+  else
+    TIMSK1 &= ~_BV(OCIE1A);  // Turn off interrupt
 }
 
 bool Player::is_playing() const
 {
-  return mute;
+  return !mute;
 }
 
 bool Player::has_error() const
@@ -367,9 +378,6 @@ int16_t Player::readWaveData(uint8_t *buff, uint16_t len, File* const file)
   {
     // turn off calling interrupt
     TIMSK1 &= ~_BV(OCIE1B);
-    
-    if (WavePlayer::sdstatus != SD_FILLING)
-      return;
 
     WavePlayer::player->sd_handler();
   }
@@ -410,24 +418,22 @@ inline void send_DAC(const uint8_t dh, const uint8_t dl)
 
 void Player::dac_handler()
 {
+  if (channel_top <= 0)
+    return;
+
   if (playpos >= playend)
   {
-    if (WavePlayer::sdstatus == SD_READY)
-    {
-      // swap double buffers
-      playpos = sdbuff;
-      playend = sdend;
-      if (sdbuff != WavePlayer::buffer1)
-        sdbuff = WavePlayer::buffer1;
-      else
-        sdbuff = WavePlayer::buffer2;
-      
-      WavePlayer::sdstatus = SD_FILLING;
-      // interrupt to call SD reader
-	    TIMSK1 |= _BV(OCIE1B);
-    }
+    // swap double buffers
+    playpos = sdbuff;
+    playend = sdend;
+    if (sdbuff != buffer1)
+      sdbuff = buffer1;
     else
-      return;
+      sdbuff = buffer2;
+
+    // interrupt to call SD reader
+    TIMSK1 |= _BV(OCIE1B);
+    // return;
   }
 
   uint8_t dh, dl;
@@ -464,9 +470,9 @@ void Player::sd_handler()
     if (!channels[i]->active)
       continue;
 
-    sei();  // enable interrupts while reading the SD
+    // sei();  // enable interrupts while reading the SD
     int16_t read_data = readWaveData(sdbuff, PLAYBUFFLEN/channel_top, channels[i]);
-    cli();
+    // cli();
 
     if (read_data > 0)
       sdend = sdbuff + read_data;
@@ -485,6 +491,4 @@ void Player::sd_handler()
       channels[i]->remainingBytesInChunk = 0;
     }
   }
-
-  WavePlayer::sdstatus = SD_READY;
 }
