@@ -465,6 +465,7 @@ void Player::dac_handler()
 
 void Player::sd_handler()
 {
+  sdend = sdbuff;
   for (int i = 0; i < CHANNEL_COUNT; ++i)
   {
     if (!channels[i]->active)
@@ -475,11 +476,9 @@ void Player::sd_handler()
     // cli();
 
     if (read_data > 0)
-      sdend = sdbuff + read_data;
+      sdend += read_data;
     else
     {
-      sdend = sdbuff;
-
       channels[i]->active = false;
 
       channels[i]->file_reader = FatReader();
