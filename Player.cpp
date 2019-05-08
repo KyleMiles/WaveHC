@@ -82,6 +82,8 @@ Player::Player()
   sdbuff = buffer2;
   sdend = sdbuff;
   
+  sdstatus = SD_READY;
+
   // Setup mode for DAC ports
   mcpDacInit();
   
@@ -117,7 +119,10 @@ bool Player::play(const char* const filename)
   }
 
   if (!verify_file(file))
+  {
+    sei();
     return false;
+  }
   sei();
 
   File* overwrite = nullptr;
@@ -187,7 +192,7 @@ bool Player::has_error() const
   return true;
 }
 
-void Player::decrement_channel_index(short reference_index)
+void Player::decrement_channel_index(int16_t reference_index)
 {
   for (int i = 0; i < CHANNEL_COUNT; ++i)
     if (channels[i]->index > reference_index)
@@ -362,25 +367,11 @@ int16_t Player::readWaveData(uint8_t *buff, uint16_t len, File* const file)
     len = maxLen;
   if (len > file->remainingBytesInChunk)
     len = file->remainingBytesInChunk;
-  
+
   int16_t ret = file->file_reader.read(buff, len);
   if (ret > 0)
     file->remainingBytesInChunk -= ret;
   return ret;
-}
-
-void _offset_readWaveData(uint16_t len, File* const file)
-{
-  // make sure buffers are aligned on SD sectors
-  uint16_t maxLen = len - file->file_reader.readPosition() % len;
-  if (len > maxLen)
-    len = maxLen;
-  if (len > file->remainingBytesInChunk)
-    len = file->remainingBytesInChunk;
-
-  uint8_t ret = file->file_reader.seekCur(len);
-  if (ret)
-    file->remainingBytesInChunk -= len;
 }
 
 // Interupts:
@@ -442,6 +433,9 @@ void Player::dac_handler()
 
   if (playpos >= playend)
   {
+    if (sdstatus != SD_READY)
+      return;
+
     // swap double buffers
     playpos = sdbuff;
     playend = sdend;
@@ -451,8 +445,8 @@ void Player::dac_handler()
       sdbuff = buffer2;
 
     // interrupt to call SD reader
+    sdstatus = SD_FILLING;
     TIMSK1 |= _BV(OCIE1B);
-    // return;
   }
 
   uint8_t dh, dl;
@@ -484,81 +478,61 @@ void Player::dac_handler()
 
 void Player::sd_handler()
 {
-  // Serial.println("######## Begin SD Handler ########");
-  
-  int sample_length = (PLAYBUFFLEN*2)/channel_top;
-  sdend = sdbuff;
+  if (sdstatus != SD_FILLING)
+    return;
 
-  for (int i = 0; i < CHANNEL_COUNT; ++i)
+  sdend = sdbuff;
+  bool first_write = true;
+
+  for (int channel_index = 0; channel_index < CHANNEL_COUNT; ++channel_index)
   {
-    if (!channels[i]->active)
+    if (!channels[channel_index]->active)
       continue;
 
-    int16_t read_data = readWaveData(buffer3+(sample_length*channels[i]->index), sample_length, channels[i]);
-    _offset_readWaveData(sample_length, channels[i]);
+    sei();  // enable interrupts while reading the SD
+    int16_t read_data = readWaveData(buffer3, PLAYBUFFLEN, channels[channel_index]);
+    // int16_t read_data = readWaveData(sdbuff, PLAYBUFFLEN, channels[channel_index]);
 
     if (read_data > 0)
-      sdend += (read_data/2);
+    {
+      if (sdend-read_data < sdbuff)  // If we read more than what's already in the buffer
+        sdend += read_data;
+
+      if (first_write)
+      {
+        first_write = false;
+        
+        for (int buffer_offset = 0; buffer_offset < read_data; buffer_offset+=2)
+        {
+          if (buffer_offset < read_data)
+            *((int16_t*)(sdbuff+buffer_offset)) = *((int16_t*)(buffer3+buffer_offset)); // Copy Over data
+            // *((int16_t*)(sdbuff+buffer_offset)) = (*((int16_t*)(buffer3+buffer_offset)))/channel_top; // Copy Over data
+          else
+            sdbuff[buffer_offset] = 0x00; // Clear buffer to zero
+        }
+      }
+      else
+        for (int buffer_offset = 0; buffer_offset < read_data; buffer_offset+=2)
+          *((int16_t*)(sdbuff+buffer_offset)) += *((int16_t*)(buffer3+buffer_offset)); // Copy Over data
+          // *((int16_t*)(sdbuff+buffer_offset)) += (*((int16_t*)(buffer3+buffer_offset)))/channel_top; // Copy Over data
+      
+      // cli();
+      // sdstatus = SD_READY;
+      // return;
+    }
     else
     {
-      channels[i]->active = false;
+      channels[channel_index]->active = false;
 
-      channels[i]->file_reader = FatReader();
+      channels[channel_index]->file_reader = FatReader();
 
-      decrement_channel_index(channels[i]->index);
-      channels[i]->index = -1;
+      decrement_channel_index(channels[channel_index]->index);
+      channels[channel_index]->index = -1;
       channel_top -= 1;
 
-      channels[i]->remainingBytesInChunk = 0;
+      channels[channel_index]->remainingBytesInChunk = 0;
     }
   }
-
-  // Copy, interlaced, half of the audio from buffer3 to sdbuff
-  int cur_pos = 0;
-
-  for (int i = 0; i < sample_length; i+=8)
-  {
-    // Serial.println("#### Next Chunk ####");
-    for (int sample = 0; sample < channel_top; ++sample)
-    {
-      // int x = (i/2)+sample;
-      int y = (sample*sample_length)+i;
-
-      // Serial.print("Sample: "); Serial.println(sample);
-      // Serial.print("  "); Serial.print(cur_pos+0); Serial.print(" = "); Serial.println(y+0);
-      // Serial.print("  "); Serial.print(cur_pos+1); Serial.print(" = "); Serial.println(y+1);
-      // Serial.print("  "); Serial.print(cur_pos+2); Serial.print(" = "); Serial.println(y+2);
-      // Serial.print("  "); Serial.print(cur_pos+3); Serial.print(" = "); Serial.println(y+3);
-      // Serial.print("  "); Serial.print(cur_pos+4); Serial.print(" = "); Serial.println(y+4);
-      // Serial.print("  "); Serial.print(cur_pos+5); Serial.print(" = "); Serial.println(y+5);
-      // Serial.print("  "); Serial.print(cur_pos+6); Serial.print(" = "); Serial.println(y+6);
-      // Serial.print("  "); Serial.print(cur_pos+7); Serial.print(" = "); Serial.println(y+7);
-
-      // Serial.print("  "); Serial.print(cur_pos+8); Serial.print(" = "); Serial.println(y+8);
-      // Serial.print("  "); Serial.print(cur_pos+9); Serial.print(" = "); Serial.println(y+9);
-      // Serial.print("  "); Serial.print(cur_pos+10); Serial.print(" = "); Serial.println(y+10);
-      // Serial.print("  "); Serial.print(cur_pos+11); Serial.print(" = "); Serial.println(y+11);
-      // Serial.print("  "); Serial.print(cur_pos+12); Serial.print(" = "); Serial.println(y+12);
-      // Serial.print("  "); Serial.print(cur_pos+13); Serial.print(" = "); Serial.println(y+13);
-      // Serial.print("  "); Serial.print(cur_pos+14); Serial.print(" = "); Serial.println(y+14);
-      // Serial.print("  "); Serial.print(cur_pos+15); Serial.print(" = "); Serial.println(y+15);
-
-      sdbuff[cur_pos++] = buffer3[y+0];
-      sdbuff[cur_pos++] = buffer3[y+1];
-      sdbuff[cur_pos++] = buffer3[y+2];
-      sdbuff[cur_pos++] = buffer3[y+3];
-      // sdbuff[cur_pos++] = buffer3[y+4];
-      // sdbuff[cur_pos++] = buffer3[y+5];
-      // sdbuff[cur_pos++] = buffer3[y+6];
-      // sdbuff[cur_pos++] = buffer3[y+7];
-      // sdbuff[cur_pos++] = buffer3[y+8];
-      // sdbuff[cur_pos++] = buffer3[y+9];
-      // sdbuff[cur_pos++] = buffer3[y+10];
-      // sdbuff[cur_pos++] = buffer3[y+11];
-      // sdbuff[cur_pos++] = buffer3[y+12];
-      // sdbuff[cur_pos++] = buffer3[y+13];
-      // sdbuff[cur_pos++] = buffer3[y+14];
-      // sdbuff[cur_pos++] = buffer3[y+15];
-    }
-  }
+  sdstatus = SD_READY;
+  cli();
 }
