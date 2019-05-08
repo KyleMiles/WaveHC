@@ -1,5 +1,7 @@
 #pragma once
 
+#define PLAYBUFFLEN 128UL
+
 #include <Settings.h>
 #include <FatReader.h>
 #include <WaveUtil.h>
@@ -36,6 +38,7 @@ class Player
  private:
   uint8_t buffer1[PLAYBUFFLEN];
   uint8_t buffer2[PLAYBUFFLEN];
+  uint8_t buffer3[PLAYBUFFLEN*2];
 
   bool mute = false;
 

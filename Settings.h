@@ -82,3 +82,6 @@
  * They define the same interrupts, so only one can be active at a time
  */
 #define USE_WAVE_HC 0
+#if USE_WAVE_HC == 0
+#define PLAYBUFFLEN 128UL
+#endif
