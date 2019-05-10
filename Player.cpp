@@ -491,7 +491,6 @@ void Player::sd_handler()
 
     sei();  // enable interrupts while reading the SD
     int16_t read_data = readWaveData(buffer3, PLAYBUFFLEN, channels[channel_index]);
-    // int16_t read_data = readWaveData(sdbuff, PLAYBUFFLEN, channels[channel_index]);
 
     if (read_data > 0)
     {
@@ -501,20 +500,35 @@ void Player::sd_handler()
       if (first_write)
       {
         first_write = false;
-        
-        for (int buffer_offset = 0; buffer_offset < read_data; buffer_offset+=2)
+
+       #if GLOBAL_BIT_DEPTH == 16  // 16-bit is signed
+        for (int buffer_offset = 0; buffer_offset < PLAYBUFFLEN; buffer_offset+=2)
         {
           if (buffer_offset < read_data)
-            *((int16_t*)(sdbuff+buffer_offset)) = *((int16_t*)(buffer3+buffer_offset)); // Copy Over data
-            // *((int16_t*)(sdbuff+buffer_offset)) = (*((int16_t*)(buffer3+buffer_offset)))/channel_top; // Copy Over data
+            *((int16_t*)(sdbuff+buffer_offset)) = *((int16_t*)(buffer3+buffer_offset));  // Copy Over data
           else
-            sdbuff[buffer_offset] = 0x00; // Clear buffer to zero
+            *((int16_t*)(sdbuff+buffer_offset)) = (int16_t)0x0000;
         }
+       #else
+        for (int buffer_offset = 0; buffer_offset < PLAYBUFFLEN; ++buffer_offset)
+        {
+          if (buffer_offset < read_data)
+            sdbuff[buffer_offset] = (buffer3[buffer_offset])/channel_top;  // Copy Over data
+          else
+            sdbuff[buffer_offset] = 0x00;  // Clear buffer to zero
+        }
+       #endif
       }
       else
+      {
+       #if GLOBAL_BIT_DEPTH == 16  // 16-bit is signed
         for (int buffer_offset = 0; buffer_offset < read_data; buffer_offset+=2)
-          *((int16_t*)(sdbuff+buffer_offset)) += *((int16_t*)(buffer3+buffer_offset)); // Copy Over data
-          // *((int16_t*)(sdbuff+buffer_offset)) += (*((int16_t*)(buffer3+buffer_offset)))/channel_top; // Copy Over data
+          *((int16_t*)(sdbuff+buffer_offset)) += *((int16_t*)(buffer3+buffer_offset));  // Copy Over data
+       #else
+        for (int buffer_offset = 0; buffer_offset < read_data; ++buffer_offset)
+          sdbuff[buffer_offset] += (buffer3[buffer_offset])/channel_top;  // Copy Over data
+       #endif
+      }
       
       // cli();
       // sdstatus = SD_READY;

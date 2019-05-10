@@ -30,7 +30,7 @@
  * Set attributes for music files
  * Cannot play multiple files together if they don't all have the same bit-rate
  */
-#define GLOBAL_BIT_DEPTH 16
+#define GLOBAL_BIT_DEPTH 8
 #if GLOBAL_BIT_DEPTH != 8 && GLOBAL_BIT_DEPTH != 16
 #error GLOBAL_BIT_DEPTH must be either 8 or 16
 #endif
@@ -40,7 +40,7 @@
 #error GLOBAL_CHANNELS must be either mono or stereo
 #endif
 
-#define GLOBAL_SAMPLERATE 16000
+#define GLOBAL_SAMPLERATE 8000
 
 //------------------------------------------------------------------------------
 // Set the size for wave data buffers.  Must be 256 or 512.
@@ -83,5 +83,5 @@
  */
 #define USE_WAVE_HC 0
 #if USE_WAVE_HC == 0
-#define PLAYBUFFLEN 128UL
+#define PLAYBUFFLEN 256UL
 #endif
