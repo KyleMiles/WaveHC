@@ -6,7 +6,7 @@
 #include <FatReader.h>
 #include <WaveUtil.h>
 
-#define CHANNEL_COUNT 3
+#define CHANNEL_COUNT 4
 
 // status of sd
 #define SD_READY 1     ///< buffer is ready to be played

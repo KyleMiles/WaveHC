@@ -118,6 +118,8 @@ bool Player::play(const char* const filename)
     return false;
   }
 
+  putstring_nl("Found File");
+
   if (!verify_file(file))
   {
     sei();
@@ -207,6 +209,12 @@ FatReader _find_and_load(const char* const filename, FatReader current_path, Fat
   // Read every file in the directory one at a time
   while (current_path.readDir(dirBuf) > 0)
   {
+    // sei();
+    // Serial.print("Looking for: ");
+    // Serial.print(filename);
+    // Serial.print(";  Looking at: ");
+    // Serial.println((char *)dirBuf.name);
+    // cli();
     // Skip it if not a subdirectory and not the file we're looking for
     if (!DIR_IS_SUBDIR(dirBuf) && strncmp((char *)dirBuf.name, filename, 11))
       continue;
